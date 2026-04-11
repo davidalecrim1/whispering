@@ -1,25 +1,28 @@
 mod audio;
 mod inject;
+mod permissions;
 mod settings;
 mod transcribe;
 
 use audio::AudioCapture;
 use global_hotkey::{
     hotkey::{Code, HotKey, Modifiers},
-    GlobalHotKeyEvent, GlobalHotKeyManager,
+    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
 };
 use std::sync::{Arc, Mutex};
 use tauri::{
     image::Image,
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, Submenu},
     tray::{TrayIconBuilder, TrayIconId},
     AppHandle, Manager,
 };
 use transcribe::Transcriber;
 
 const TRAY_ID: &str = "whispering-tray";
+const MENU_LANG_EN: &str = "lang-en";
+const MENU_LANG_PT: &str = "lang-pt";
+const MENU_TOGGLE: &str = "toggle-recording";
 
-// Embed icons at compile time so they work in both dev and release
 static ICON_IDLE: &[u8] = include_bytes!("../icons/tray-idle.png");
 static ICON_RECORDING: &[u8] = include_bytes!("../icons/tray-recording.png");
 
@@ -48,7 +51,13 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state.clone())
         .setup(move |app| {
-            // Load model in background so startup is fast
+            // Request permissions upfront so the system dialogs appear on first launch
+            permissions::request_accessibility();
+            permissions::request_microphone();
+
+            // Hide from Dock — menu bar only
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let state_clone = state.clone();
             let model_path = {
                 let cfg = state_clone.config.lock().unwrap();
@@ -64,26 +73,29 @@ pub fn run() {
                 }
             });
 
-            // Register global hotkey Ctrl+Cmd+M
             let manager = GlobalHotKeyManager::new()?;
             let hotkey = HotKey::new(
                 Some(Modifiers::CONTROL | Modifiers::META),
                 Code::KeyM,
             );
             manager.register(hotkey)?;
-            // Keep manager alive for the duration of the app
             app.manage(manager);
 
-            // Build system tray
-            build_tray(app.handle())?;
+            let current_lang = {
+                let cfg = state.config.lock().unwrap();
+                cfg.language.clone()
+            };
+            build_tray(app.handle(), &current_lang, false)?;
 
-            // Spawn hotkey event loop
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let receiver = GlobalHotKeyEvent::receiver();
                 loop {
-                    if receiver.recv().is_ok() {
-                        toggle_recording(handle.clone());
+                    if let Ok(event) = receiver.recv() {
+                        // Only act on key-down, ignore key-up
+                        if event.state() == HotKeyState::Pressed {
+                            toggle_recording(handle.clone());
+                        }
                     }
                 }
             });
@@ -95,21 +107,68 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn build_tray(handle: &AppHandle) -> tauri::Result<()> {
+fn build_tray(handle: &AppHandle, current_lang: &str, is_recording: bool) -> tauri::Result<()> {
+    let toggle_label = if is_recording { "Stop Recording" } else { "Start Recording" };
+    let toggle = MenuItem::with_id(handle, MENU_TOGGLE, toggle_label, true, None::<&str>)?;
+
+    let lang_en = CheckMenuItem::with_id(
+        handle, MENU_LANG_EN, "English", true, current_lang == "en", None::<&str>,
+    )?;
+    let lang_pt = CheckMenuItem::with_id(
+        handle, MENU_LANG_PT, "Portuguese", true, current_lang == "pt", None::<&str>,
+    )?;
+    let lang_submenu = Submenu::with_items(handle, "Language", true, &[&lang_en, &lang_pt])?;
     let quit = MenuItem::with_id(handle, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(handle, &[&quit])?;
+    let menu = Menu::with_items(handle, &[&toggle, &lang_submenu, &quit])?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .icon(idle_icon())
-        .on_menu_event(|app, event| {
-            if event.id() == "quit" {
-                app.exit(0);
-            }
+        .on_menu_event(move |app, event| match event.id().as_ref() {
+            MENU_TOGGLE => toggle_recording(app.clone()),
+            MENU_LANG_EN => set_language(app, "en"),
+            MENU_LANG_PT => set_language(app, "pt"),
+            "quit" => app.exit(0),
+            _ => {}
         })
         .build(handle)?;
 
     Ok(())
+}
+
+fn rebuild_tray_menu(handle: &AppHandle, current_lang: &str, is_recording: bool) {
+    let id = TrayIconId::new(TRAY_ID);
+    if let Some(tray) = handle.tray_by_id(&id) {
+        let toggle_label = if is_recording { "Stop Recording" } else { "Start Recording" };
+        if let (Ok(toggle), Ok(lang_en), Ok(lang_pt), Ok(quit)) = (
+            MenuItem::with_id(handle, MENU_TOGGLE, toggle_label, true, None::<&str>),
+            CheckMenuItem::with_id(handle, MENU_LANG_EN, "English", true, current_lang == "en", None::<&str>),
+            CheckMenuItem::with_id(handle, MENU_LANG_PT, "Portuguese", true, current_lang == "pt", None::<&str>),
+            MenuItem::with_id(handle, "quit", "Quit", true, None::<&str>),
+        ) {
+            if let Ok(lang_submenu) = Submenu::with_items(handle, "Language", true, &[&lang_en, &lang_pt]) {
+                if let Ok(menu) = Menu::with_items(handle, &[&toggle, &lang_submenu, &quit]) {
+                    let _ = tray.set_menu(Some(menu));
+                }
+            }
+        }
+    }
+}
+
+fn set_language(handle: &AppHandle, lang: &str) {
+    let state = handle.state::<Arc<WhisperingState>>();
+    let is_recording = {
+        let cfg = state.config.lock().unwrap();
+        let _ = settings::save(&cfg);
+        matches!(*state.recording.lock().unwrap(), RecordingState::Recording(_))
+    };
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.language = lang.to_string();
+        settings::save(&cfg).ok();
+    }
+    rebuild_tray_menu(handle, lang, is_recording);
+    log::info!("Language set to {}", lang);
 }
 
 fn idle_icon() -> Image<'static> {
@@ -132,7 +191,6 @@ fn toggle_recording(handle: AppHandle) {
     let state = handle.state::<Arc<WhisperingState>>();
     let mut recording = state.recording.lock().unwrap();
 
-    // Determine current state and decide action, taking ownership if stopping
     let is_idle = matches!(*recording, RecordingState::Idle);
 
     if is_idle {
@@ -145,6 +203,8 @@ fn toggle_recording(handle: AppHandle) {
                 *recording = RecordingState::Recording(capture);
                 drop(recording);
                 set_tray_icon(&handle, true);
+                let lang = state.config.lock().unwrap().language.clone();
+                rebuild_tray_menu(&handle, &lang, true);
                 log::info!("Recording started");
             }
             Err(e) => log::error!("Failed to start recording: {}", e),
@@ -153,6 +213,8 @@ fn toggle_recording(handle: AppHandle) {
         let prev = std::mem::replace(&mut *recording, RecordingState::Idle);
         drop(recording);
         set_tray_icon(&handle, false);
+        let lang = state.config.lock().unwrap().language.clone();
+        rebuild_tray_menu(&handle, &lang, false);
         log::info!("Recording stopped, transcribing...");
 
         if let RecordingState::Recording(capture) = prev {
@@ -160,9 +222,10 @@ fn toggle_recording(handle: AppHandle) {
             std::thread::spawn(move || {
                 match capture.stop() {
                     Ok(audio) => {
+                        let language = state_clone.config.lock().unwrap().language.clone();
                         let guard = state_clone.transcriber.lock().unwrap();
                         if let Some(t) = &*guard {
-                            match t.transcribe(&audio) {
+                            match t.transcribe(&audio, &language) {
                                 Ok(text) if !text.is_empty() => {
                                     drop(guard);
                                     if let Err(e) = inject::type_text(&text) {

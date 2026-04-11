@@ -12,7 +12,7 @@ name = "whispering_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.5.6" }
+tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
 tauri = { version = "2.10.3", features = ["tray-icon", "image-ico", "image-png", "macos-private-api"] }
@@ -27,3 +27,11 @@ toml = "1.1"
 log = "0.4"
 anyhow = "1.0"
 dirs-next = "2.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.9"
+accessibility-sys = "0.1"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString"] }
+objc2-av-foundation = { version = "0.3", features = ["AVCaptureDevice", "AVMediaFormat", "block2"] }
+block2 = "0.6"

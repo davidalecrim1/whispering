@@ -6,6 +6,8 @@ use std::path::PathBuf;
 pub struct Config {
     pub model_path: PathBuf,
     pub input_device: Option<String>,
+    #[serde(default = "default_language")]
+    pub language: String,
 }
 
 impl Default for Config {
@@ -13,8 +15,13 @@ impl Default for Config {
         Self {
             model_path: default_model_path(),
             input_device: None,
+            language: default_language(),
         }
     }
+}
+
+fn default_language() -> String {
+    "en".to_string()
 }
 
 fn default_model_path() -> PathBuf {

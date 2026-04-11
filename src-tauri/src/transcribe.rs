@@ -23,9 +23,9 @@ impl Transcriber {
         Ok(Self { ctx })
     }
 
-    pub fn transcribe(&self, audio: &[f32]) -> Result<String> {
+    pub fn transcribe(&self, audio: &[f32], language: &str) -> Result<String> {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(Some("en"));
+        params.set_language(Some(language));
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
