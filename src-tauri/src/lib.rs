@@ -24,8 +24,9 @@ const MENU_LANG_EN: &str = "lang-en";
 const MENU_LANG_PT: &str = "lang-pt";
 const MENU_TOGGLE: &str = "toggle-recording";
 
-static ICON_IDLE: &[u8] = include_bytes!("../icons/tray-idle.png");
-static ICON_RECORDING: &[u8] = include_bytes!("../icons/tray-recording.png");
+// Use @2x (44px) assets — macOS renders them crisp on both Retina and non-Retina
+static ICON_IDLE: &[u8] = include_bytes!("../icons/tray-idle@2x.png");
+static ICON_RECORDING: &[u8] = include_bytes!("../icons/tray-recording@2x.png");
 
 enum RecordingState {
     Idle,
