@@ -130,7 +130,7 @@ fn build_tray(handle: &AppHandle, current_lang: &str, is_recording: bool) -> tau
             MENU_TOGGLE => toggle_recording(app.clone()),
             MENU_LANG_EN => set_language(app, "en"),
             MENU_LANG_PT => set_language(app, "pt"),
-            "quit" => app.exit(0),
+            "quit" => graceful_shutdown(app),
             _ => {}
         })
         .build(handle)?;
@@ -155,6 +155,24 @@ fn rebuild_tray_menu(handle: &AppHandle, current_lang: &str, is_recording: bool)
             }
         }
     }
+}
+
+fn graceful_shutdown(handle: &AppHandle) {
+    let state = handle.state::<Arc<WhisperingState>>();
+    let mut recording = state.recording.lock().unwrap();
+
+    // If recording is active, stop the stream cleanly before exiting
+    if matches!(*recording, RecordingState::Recording(_)) {
+        let prev = std::mem::replace(&mut *recording, RecordingState::Idle);
+        drop(recording);
+        sounds::play_stop();
+        if let RecordingState::Recording(capture) = prev {
+            // Drop the capture to close the mic stream; discard audio
+            drop(capture);
+        }
+    }
+
+    handle.exit(0);
 }
 
 fn set_language(handle: &AppHandle, lang: &str) {
