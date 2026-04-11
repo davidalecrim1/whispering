@@ -2,7 +2,7 @@ MODELS_DIR := $(HOME)/.whispering/models
 MODEL_NAME := ggml-medium.en.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL_NAME)
 
-.PHONY: install install-model build dev clean
+.PHONY: install install-model build dev release lint clean
 
 ## Download the default whisper.cpp model (medium.en) to ~/.whispering/models/
 install: install-model
@@ -28,6 +28,11 @@ dev:
 ## Build release bundle
 release:
 	cargo tauri build
+
+## Run cargo fmt (format) and clippy (lint)
+lint:
+	cargo fmt --manifest-path src-tauri/Cargo.toml
+	cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 
 ## Remove build artifacts
 clean:
