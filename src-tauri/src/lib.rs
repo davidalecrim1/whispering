@@ -2,6 +2,7 @@ mod audio;
 mod inject;
 mod permissions;
 mod settings;
+mod sounds;
 mod transcribe;
 
 use audio::AudioCapture;
@@ -205,6 +206,7 @@ fn toggle_recording(handle: AppHandle) {
                 set_tray_icon(&handle, true);
                 let lang = state.config.lock().unwrap().language.clone();
                 rebuild_tray_menu(&handle, &lang, true);
+                sounds::play_start();
                 log::info!("Recording started");
             }
             Err(e) => log::error!("Failed to start recording: {}", e),
@@ -215,6 +217,7 @@ fn toggle_recording(handle: AppHandle) {
         set_tray_icon(&handle, false);
         let lang = state.config.lock().unwrap().language.clone();
         rebuild_tray_menu(&handle, &lang, false);
+        sounds::play_stop();
         log::info!("Recording stopped, transcribing...");
 
         if let RecordingState::Recording(capture) = prev {

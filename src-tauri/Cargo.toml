@@ -33,5 +33,6 @@ core-foundation = "0.9"
 accessibility-sys = "0.1"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString"] }
+objc2-app-kit = { version = "0.3", features = ["NSSound"] }
 objc2-av-foundation = { version = "0.3", features = ["AVCaptureDevice", "AVMediaFormat", "block2"] }
 block2 = "0.6"
