@@ -4,6 +4,8 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Whispering needs microphone access to record your speech for transcription.</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>10.15</string>
   <key>LSUIElement</key>
   <true/>
 </dict>

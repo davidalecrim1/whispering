@@ -1,6 +1,8 @@
+use crate::settings::Config;
+
 /// Request accessibility permission (for keystroke injection via enigo).
 /// Shows the system dialog if not yet granted.
-pub fn request_accessibility() {
+pub fn request_accessibility(config: &mut Config) {
     #[cfg(target_os = "macos")]
     unsafe {
         use accessibility_sys::{AXIsProcessTrusted, AXIsProcessTrustedWithOptions};
@@ -13,10 +15,15 @@ pub fn request_accessibility() {
             return;
         }
 
+        if config.permission_prompts.accessibility_requested {
+            return;
+        }
+
         let key = CFString::new("AXTrustedCheckOptionPrompt");
         let val = CFBoolean::true_value();
         let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), val.as_CFType())]);
         AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef());
+        config.permission_prompts.accessibility_requested = true;
     }
 }
 
@@ -32,7 +39,7 @@ pub fn request_microphone() {
         let audio_type = AVMediaTypeAudio.unwrap();
         let status = AVCaptureDevice::authorizationStatusForMediaType(audio_type);
 
-        if status == AVAuthorizationStatus::Authorized {
+        if status != AVAuthorizationStatus::NotDetermined {
             return;
         }
 

@@ -13,6 +13,13 @@ pub const DEFAULT_MULTILINGUAL_MODEL_NAME: &str = "ggml-medium.bin";
 pub struct Config {
     pub model_path: PathBuf,
     pub input_device: Option<String>,
+    #[serde(default)]
+    pub permission_prompts: PermissionPrompts,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PermissionPrompts {
+    pub accessibility_requested: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,8 +43,9 @@ impl InstalledModel {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            model_path: default_english_model_path(),
+            model_path: default_multilingual_model_path(),
             input_device: None,
+            permission_prompts: PermissionPrompts::default(),
         }
     }
 }
@@ -120,10 +128,10 @@ pub fn load() -> Config {
     };
 
     if !config.model_path.exists() {
-        if default_english_model_path().exists() {
-            config.model_path = default_english_model_path();
-        } else if default_multilingual_model_path().exists() {
+        if default_multilingual_model_path().exists() {
             config.model_path = default_multilingual_model_path();
+        } else if default_english_model_path().exists() {
+            config.model_path = default_english_model_path();
         }
     }
 

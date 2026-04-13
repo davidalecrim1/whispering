@@ -1,10 +1,11 @@
 MODELS_DIR := $(HOME)/.whispering/models
-MODEL_NAME := ggml-medium.en.bin
-MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL_NAME)
+MODEL_NAME ?= ggml-medium.bin
+MODEL_URL ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL_NAME)
+APP_BUNDLE_ID := com.davidalecrim.whispering
 
-.PHONY: install install-model build dev release lint clean
+.PHONY: install install-model build dev release lint clean clean-permissions
 
-## Download the default whisper.cpp model (medium English-only) to ~/.whispering/models/
+## Download the default whisper.cpp model (medium multilingual) to ~/.whispering/models/
 install: install-model
 
 install-model:
@@ -27,7 +28,8 @@ dev:
 
 ## Build release bundle
 release:
-	cargo tauri build
+	cargo tauri build --bundles app
+	./scripts/build_dmg.sh
 
 ## Run cargo fmt (format) and clippy (lint)
 lint:
@@ -37,3 +39,8 @@ lint:
 ## Remove build artifacts
 clean:
 	cargo clean --manifest-path src-tauri/Cargo.toml
+
+## Reset macOS TCC permissions that can conflict between dev and release builds
+clean-permissions:
+	tccutil reset Accessibility
+	tccutil reset Microphone $(APP_BUNDLE_ID)

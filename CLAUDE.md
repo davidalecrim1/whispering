@@ -11,7 +11,7 @@ make dev          # Run in development mode (cargo tauri dev)
 make build        # Debug build only (cargo build)
 make release      # Bundle .app / .dmg (cargo tauri build)
 make lint         # cargo fmt + clippy -D warnings
-make install      # Download ggml-medium.en.bin model to ~/.whispering/models/
+make install      # Download ggml-medium.bin model to ~/.whispering/models/
 make clean        # Remove build artifacts
 ```
 
@@ -44,7 +44,7 @@ This is a macOS-only menu bar app (no Dock icon). The entire app logic is in `sr
 
 **Key design decisions**:
 - The `global-hotkey` event fires on both `Pressed` and `Released` — we filter to `Pressed` only to avoid double-toggle.
-- The `Transcriber` is loaded once at startup (warm Metal context) and reused for every transcription. Model path is configurable; default is `~/.whispering/models/ggml-medium.en.bin`.
+- The `Transcriber` is loaded once at startup (warm Metal context) and reused for every transcription. Model path is configurable; default is `~/.whispering/models/ggml-medium.bin`.
 - Icons are `include_bytes!`-embedded at compile time (`tray-idle@2x.png`, `tray-recording@2x.png`) so they work in both dev and release without path issues.
 - `LSUIElement = true` in `Info.plist` hides the Dock icon. `ActivationPolicy::Accessory` is also set at runtime for dev mode.
 
@@ -67,6 +67,6 @@ This is a macOS-only menu bar app (no Dock icon). The entire app logic is in `sr
 
 ## Runtime prerequisites
 
-- Model file at `~/.whispering/models/ggml-medium.en.bin` (run `make install`)
+- Model file at `~/.whispering/models/ggml-medium.bin` (run `make install`)
 - macOS Accessibility permission granted (prompted on first launch)
 - macOS Microphone permission granted (prompted on first launch)

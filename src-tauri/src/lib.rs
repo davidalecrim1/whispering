@@ -178,12 +178,12 @@ fn build_models_menu_items(
 
     for (name, path) in [
         (
-            settings::DEFAULT_ENGLISH_MODEL_NAME,
-            settings::default_english_model_path(),
-        ),
-        (
             settings::DEFAULT_MULTILINGUAL_MODEL_NAME,
             settings::default_multilingual_model_path(),
+        ),
+        (
+            settings::DEFAULT_ENGLISH_MODEL_NAME,
+            settings::default_english_model_path(),
         ),
     ] {
         if path.exists() {
