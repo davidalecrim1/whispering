@@ -15,7 +15,11 @@ impl AudioCapture {
 
         let device: Device = if let Some(name) = device_name {
             host.input_devices()?
-                .find(|d| d.description().map(|desc| desc.name() == name).unwrap_or(false))
+                .find(|d| {
+                    d.description()
+                        .map(|desc| desc.name() == name)
+                        .unwrap_or(false)
+                })
                 .ok_or_else(|| anyhow!("Input device '{}' not found", name))?
         } else {
             host.default_input_device()

@@ -4,7 +4,7 @@ MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL_N
 
 .PHONY: install install-model build dev release lint clean
 
-## Download the default whisper.cpp model (medium.en) to ~/.whispering/models/
+## Download the default whisper.cpp model (medium English-only) to ~/.whispering/models/
 install: install-model
 
 install-model:

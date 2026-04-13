@@ -17,11 +17,9 @@ fn play(path: &str) {
         use objc2_foundation::NSString;
 
         let path = NSString::from_str(path);
-        if let Some(sound) = NSSound::initWithContentsOfFile_byReference(
-            NSSound::alloc(),
-            &path,
-            true,
-        ) {
+        if let Some(sound) =
+            NSSound::initWithContentsOfFile_byReference(NSSound::alloc(), &path, true)
+        {
             sound.play();
         }
     }
