@@ -4,8 +4,10 @@ MODEL_URL ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL_N
 APP_BUNDLE_ID := com.davidalecrim.whispering
 CARGO_MANIFEST := src-tauri/Cargo.toml
 CARGO_FLAGS := --locked --manifest-path $(CARGO_MANIFEST)
+APP_BUNDLE := src-tauri/target/release/bundle/macos/Whispering.app
+APPLICATIONS_APP := /Applications/Whispering.app
 
-.PHONY: install install-model build dev release frontend fmt fmt-check check clippy clippy-review test lint clean clean-permissions
+.PHONY: install install-model install-app reinstall build dev release frontend fmt fmt-check check clippy clippy-review test lint clean clean-accessibility clean-permissions
 
 ## Download the default whisper.cpp model (medium multilingual) to ~/.whispering/models/
 install: install-model
@@ -29,9 +31,19 @@ dev:
 	cargo tauri dev
 
 ## Build release bundle
-release:
+release: clean-accessibility
 	cargo tauri build --bundles app
 	./scripts/build_dmg.sh
+
+## Install the release app into /Applications for local testing
+install-app: clean-accessibility
+	pkill -x Whispering || true
+	rm -rf "$(APPLICATIONS_APP)"
+	cp -R "$(APP_BUNDLE)" "$(APPLICATIONS_APP)"
+	open "$(APPLICATIONS_APP)"
+
+## Build release bundle and reinstall it locally
+reinstall: release install-app
 
 frontend:
 	npm run build
@@ -61,7 +73,10 @@ lint: frontend fmt-check clippy test
 clean:
 	cargo clean --manifest-path $(CARGO_MANIFEST)
 
+## Remove this app from macOS Accessibility permissions before rebuilding release
+clean-accessibility:
+	@tccutil reset Accessibility $(APP_BUNDLE_ID) 2>/dev/null || true
+
 ## Reset macOS TCC permissions that can conflict between dev and release builds
-clean-permissions:
-	tccutil reset Accessibility
+clean-permissions: clean-accessibility
 	tccutil reset Microphone $(APP_BUNDLE_ID)

@@ -1,10 +1,15 @@
 use anyhow::Result;
 use serde::Serialize;
-use tauri::{Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
+use tauri::{
+    tray::TrayIconId, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    Wry,
+};
 
 const OVERLAY_LABEL: &str = "status-overlay";
+const TRAY_ID: &str = "whispering-tray";
 const OVERLAY_WIDTH: f64 = 240.0;
 const OVERLAY_HEIGHT: f64 = 74.0;
+const MENU_BAR_MARGIN: f64 = 8.0;
 
 #[derive(Clone, Copy)]
 pub enum OverlayKind {
@@ -47,7 +52,7 @@ pub fn hide(handle: &tauri::AppHandle) {
 
 fn show_inner(handle: &tauri::AppHandle, kind: OverlayKind, message: &str) -> Result<()> {
     let window = ensure_overlay(handle)?;
-    position_near_cursor(handle, &window);
+    position_under_tray_icon(handle, &window);
 
     let payload = OverlayPayload {
         kind: kind.as_str(),
@@ -88,13 +93,35 @@ fn ensure_overlay(handle: &tauri::AppHandle) -> Result<WebviewWindow<Wry>> {
     Ok(window)
 }
 
-fn position_near_cursor(handle: &tauri::AppHandle, window: &WebviewWindow<Wry>) {
-    let Ok(cursor) = handle.cursor_position() else {
+fn position_under_tray_icon(handle: &tauri::AppHandle, window: &WebviewWindow<Wry>) {
+    let Some(position) = tray_anchor_position(handle).or_else(|| primary_menu_bar_position(handle))
+    else {
         return;
     };
 
-    let position = PhysicalPosition::new(cursor.x + 18.0, cursor.y + 22.0);
     if let Err(err) = window.set_position(position) {
         log::error!("Failed to position status overlay: {}", err);
     }
+}
+
+fn tray_anchor_position(handle: &tauri::AppHandle) -> Option<PhysicalPosition<f64>> {
+    let tray = handle.tray_by_id(&TrayIconId::new(TRAY_ID))?;
+    let rect = tray.rect().ok()??;
+    let position = rect.position.to_physical::<f64>(1.0);
+    let size = rect.size.to_physical::<f64>(1.0);
+    let center_x = position.x + size.width / 2.0;
+    let x = (center_x - OVERLAY_WIDTH / 2.0).max(MENU_BAR_MARGIN);
+    let y = position.y + size.height + MENU_BAR_MARGIN;
+
+    Some(PhysicalPosition::new(x, y))
+}
+
+fn primary_menu_bar_position(handle: &tauri::AppHandle) -> Option<PhysicalPosition<f64>> {
+    let monitor = handle.primary_monitor().ok()??;
+    let origin = monitor.position();
+    let size = monitor.size();
+    let x = f64::from(origin.x) + f64::from(size.width) - OVERLAY_WIDTH - MENU_BAR_MARGIN;
+    let y = f64::from(origin.y) + MENU_BAR_MARGIN;
+
+    Some(PhysicalPosition::new(x, y))
 }

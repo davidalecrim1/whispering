@@ -101,7 +101,7 @@ After launch, Whispering runs as a menu bar app with no Dock icon.
 - Press `Ctrl+Cmd+M` to start recording
 - Press `Ctrl+Cmd+M` again to stop recording and transcribe
 - The transcribed text is typed at the current cursor position
-- During recording and transcription, a small floating status indicator shows the current state.
+- During recording and transcription, a small status popover appears under the menu-bar icon.
 - If text injection fails or focus was wrong, recover the last successful transcription with:
 
 ```bash

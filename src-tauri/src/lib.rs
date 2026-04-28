@@ -30,7 +30,6 @@ const MENU_TOGGLE: &str = "toggle-recording";
 const MENU_QUIT: &str = "quit";
 const MODEL_ID_PREFIX: &str = "model-select:";
 const MODEL_INSTALL_PREFIX: &str = "model-install:";
-const MENU_LAST_ERROR: &str = "last-error";
 
 // Use @2x (44px) assets — macOS renders them crisp on both Retina and non-Retina
 static ICON_IDLE: &[u8] = include_bytes!("../icons/tray-idle@2x.png");
@@ -167,12 +166,6 @@ fn build_tray(
                 toggle_recording(app.clone());
             } else if id == MENU_QUIT {
                 graceful_shutdown(app);
-            } else if id == MENU_LAST_ERROR {
-                let state = app.state::<Arc<WhisperingState>>();
-                let error = state.status.lock().unwrap().last_error.clone();
-                if let Some(error) = error {
-                    status::show(app, status::OverlayKind::Error, &short_message(&error));
-                }
             } else if let Some(path) = menu_model_path(id) {
                 set_model(app, path);
             } else if let Some(name) = install_model_name(id) {
@@ -212,25 +205,8 @@ fn build_menu(
         .collect::<Vec<_>>();
     let models = Submenu::with_items(handle, "Models", status.phase.models_enabled(), &model_refs)?;
 
-    let last_error = status.last_error.as_ref().map(|error| {
-        MenuItem::with_id(
-            handle,
-            MENU_LAST_ERROR,
-            format!("Last Error: {}", error),
-            true,
-            None::<&str>,
-        )
-    });
-    let last_error = match last_error {
-        Some(item) => Some(item?),
-        None => None,
-    };
-
     let quit = MenuItem::with_id(handle, MENU_QUIT, "Quit", true, None::<&str>)?;
-    let mut items = vec![&toggle as &dyn IsMenuItem<_>, &models, &quit];
-    if let Some(last_error) = &last_error {
-        items.insert(2, last_error);
-    }
+    let items = vec![&toggle as &dyn IsMenuItem<_>, &models, &quit];
 
     Menu::with_items(handle, &items)
 }

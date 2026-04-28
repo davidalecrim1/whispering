@@ -57,7 +57,7 @@ This is a macOS-only menu bar app with no Dock icon.
 
 **Rust entry point**: `lib.rs::run()` bootstraps permissions, model loading, tray setup, and the hotkey event loop. `main.rs` just calls `whispering_lib::run()`.
 
-**Frontend**: The lightweight floating status overlay is React + TypeScript under `src/`, built by Vite into ignored `dist/`. Tauri loads the generated `index.html` for the overlay window.
+**Frontend**: The lightweight status popover is React + TypeScript under `src/`, built by Vite into ignored `dist/`. Tauri loads the generated `index.html` for a non-focus-stealing window anchored under the menu-bar tray icon.
 
 **State machine**: A single `Arc<WhisperingState>` is shared across threads via Tauri `.manage()`. It owns:
 
@@ -69,10 +69,10 @@ This is a macOS-only menu bar app with no Dock icon.
 **Recording flow**:
 
 1. `Ctrl+Cmd+M` on key-down only calls `toggle_recording()`.
-2. Idle starts `AudioCapture`, sets tray/overlay to recording, and plays the start sound.
+2. Idle starts `AudioCapture`, sets tray/status popover to recording, and plays the start sound.
 3. Recording stops capture, switches to transcribing, and runs Whisper on a background thread.
 4. Successful transcription is saved to cache before text injection.
-5. Injection success shows a short success state; failures are shown in the overlay/tray and remain recoverable from cache.
+5. Injection success shows a short success state; failures are shown in the status popover and remain recoverable from cache.
 
 **Recovery location**:
 
@@ -93,7 +93,7 @@ This is cache data so macOS may clean it under storage pressure. Do not save raw
 | `settings.rs` | Config load/save, model discovery, model language behavior |
 | `permissions.rs` | Accessibility and microphone permission prompts |
 | `sounds.rs` | Start/stop system sounds |
-| `status.rs` | Floating overlay window control |
+| `status.rs` | Menu-bar anchored status popover control |
 | `transcripts.rs` | macOS cache transcript recovery writes |
 
 ## Runtime Prerequisites
