@@ -6,6 +6,7 @@ Whispering is a macOS menu bar speech-to-text app built with Tauri and Rust. It 
 
 - macOS 10.15 or newer
 - Rust toolchain (`rustup`)
+- Node.js and npm
 - Tauri CLI (`cargo install tauri-cli`)
 - A local Whisper ggml model file
 
@@ -15,6 +16,7 @@ This app is macOS-only. The current implementation depends on macOS permissions,
 Clone the repo, then from the repo root:
 
 ```bash
+npm install
 make install
 make dev
 ```
@@ -27,7 +29,8 @@ Useful commands:
 make dev      # run the app in development mode
 make build    # debug build
 make release  # build the macOS app bundle and DMG
-make lint     # cargo fmt + clippy -D warnings
+make lint     # frontend typecheck/build + cargo fmt + clippy -D warnings
+make clippy-review # extended Rust review lint pass
 make clean    # remove build artifacts
 ```
 
@@ -35,8 +38,8 @@ If you prefer raw Cargo commands:
 
 ```bash
 cargo build --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
-cargo fmt --manifest-path src-tauri/Cargo.toml
+cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 ```
 
 ## Install the App on macOS
@@ -98,7 +101,14 @@ After launch, Whispering runs as a menu bar app with no Dock icon.
 - Press `Ctrl+Cmd+M` to start recording
 - Press `Ctrl+Cmd+M` again to stop recording and transcribe
 - The transcribed text is typed at the current cursor position
+- During recording and transcription, a small floating status indicator shows the current state.
+- If text injection fails or focus was wrong, recover the last successful transcription with:
+
+```bash
+cat ~/Library/Caches/Whispering/transcripts/latest.txt
+```
 
 ## Notes
 
 - The default config is stored at `~/.whispering/config.toml`.
+- Transcription recovery files are stored in `~/Library/Caches/Whispering/transcripts/`, so macOS can clean them when storage is needed.

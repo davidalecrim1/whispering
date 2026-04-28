@@ -2,8 +2,10 @@ MODELS_DIR := $(HOME)/.whispering/models
 MODEL_NAME ?= ggml-medium.bin
 MODEL_URL ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL_NAME)
 APP_BUNDLE_ID := com.davidalecrim.whispering
+CARGO_MANIFEST := src-tauri/Cargo.toml
+CARGO_FLAGS := --locked --manifest-path $(CARGO_MANIFEST)
 
-.PHONY: install install-model build dev release lint clean clean-permissions
+.PHONY: install install-model build dev release frontend fmt fmt-check check clippy clippy-review test lint clean clean-permissions
 
 ## Download the default whisper.cpp model (medium multilingual) to ~/.whispering/models/
 install: install-model
@@ -19,8 +21,8 @@ install-model:
 	fi
 
 ## Build the app in debug mode
-build:
-	cargo build --manifest-path src-tauri/Cargo.toml
+build: frontend
+	cargo build $(CARGO_FLAGS)
 
 ## Build and run in dev mode via Tauri CLI
 dev:
@@ -31,14 +33,33 @@ release:
 	cargo tauri build --bundles app
 	./scripts/build_dmg.sh
 
-## Run cargo fmt (format) and clippy (lint)
-lint:
-	cargo fmt --manifest-path src-tauri/Cargo.toml
-	cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+frontend:
+	npm run build
+
+fmt:
+	cargo fmt --manifest-path $(CARGO_MANIFEST)
+
+fmt-check:
+	cargo fmt --manifest-path $(CARGO_MANIFEST) -- --check
+
+check:
+	cargo check $(CARGO_FLAGS)
+
+clippy:
+	cargo clippy $(CARGO_FLAGS) --all-targets -- -D warnings
+
+clippy-review:
+	cargo clippy $(CARGO_FLAGS) --all-targets -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+
+test:
+	cargo test $(CARGO_FLAGS)
+
+## Run frontend build, rustfmt check, clippy, and tests
+lint: frontend fmt-check clippy test
 
 ## Remove build artifacts
 clean:
-	cargo clean --manifest-path src-tauri/Cargo.toml
+	cargo clean --manifest-path $(CARGO_MANIFEST)
 
 ## Reset macOS TCC permissions that can conflict between dev and release builds
 clean-permissions:

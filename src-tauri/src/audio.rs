@@ -69,6 +69,7 @@ impl AudioCapture {
         Ok(resampled)
     }
 
+    #[allow(dead_code)]
     pub fn available_devices() -> Result<Vec<String>> {
         let host = cpal::default_host();
         let names = host
