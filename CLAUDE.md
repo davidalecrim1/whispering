@@ -18,7 +18,7 @@ Run commands from the repository root.
 npm install        # install React/Vite frontend dependencies
 make dev           # run Tauri dev mode
 make build         # build frontend and Rust app with Cargo.lock respected
-make lint          # frontend build, rustfmt check, clippy, and tests
+make lint          # bootstrap frontend deps if needed, then run frontend build, rustfmt check, clippy, and tests
 make clippy        # clippy with -D warnings across all Rust targets
 make clippy-review # extended Rust review lint pass
 make fmt           # apply rustfmt
@@ -44,6 +44,7 @@ Use `make clippy-review` for deeper Rust review. It enables `clippy::all`, `clip
 ## Rust Practices
 
 - Treat `make lint` as the default pre-commit gate.
+- Always run `make lint` at the end of a task before handing work back.
 - Prefer `cargo fmt -- --check` in verification paths; use `make fmt` only when intentionally rewriting formatting.
 - Run clippy with `--all-targets` and `-D warnings` for normal work.
 - Keep lock lifetimes tight. Do not hold a `MutexGuard` across unrelated work.

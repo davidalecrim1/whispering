@@ -6,7 +6,55 @@ use std::sync::{Arc, Mutex};
 pub struct AudioCapture {
     _stream: Stream,
     buffer: Arc<Mutex<Vec<f32>>>,
+    meter: RecordingLevel,
     sample_rate: u32,
+}
+
+#[derive(Clone)]
+pub struct RecordingLevel {
+    inner: Arc<Mutex<LevelMeter>>,
+}
+
+impl RecordingLevel {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(LevelMeter::default())),
+        }
+    }
+
+    pub fn value(&self) -> f32 {
+        self.inner.lock().unwrap().level()
+    }
+
+    fn update(&self, rms: f32) {
+        self.inner.lock().unwrap().update(rms);
+    }
+}
+
+#[derive(Debug, Default)]
+struct LevelMeter {
+    level: f32,
+}
+
+impl LevelMeter {
+    fn update(&mut self, rms: f32) -> f32 {
+        const INPUT_GAIN: f32 = 8.0;
+        const ATTACK: f32 = 0.5;
+        const RELEASE: f32 = 0.18;
+
+        let normalized = (rms * INPUT_GAIN).clamp(0.0, 1.0);
+        let smoothing = if normalized >= self.level {
+            ATTACK
+        } else {
+            RELEASE
+        };
+        self.level += (normalized - self.level) * smoothing;
+        self.level
+    }
+
+    fn level(&self) -> f32 {
+        self.level
+    }
 }
 
 impl AudioCapture {
@@ -32,18 +80,19 @@ impl AudioCapture {
 
         let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
         let buffer_clone = buffer.clone();
+        let meter = RecordingLevel::new();
+        let meter_clone = meter.clone();
 
         let stream_config: StreamConfig = config.into();
 
         let stream = device.build_input_stream(
             &stream_config,
             move |data: &[f32], _| {
-                // Downmix to mono by averaging channels
+                // The overlay meter should reflect the same mono signal sent to Whisper.
                 let mut buf = buffer_clone.lock().unwrap();
-                for chunk in data.chunks(channels) {
-                    let sample: f32 = chunk.iter().sum::<f32>() / channels as f32;
-                    buf.push(sample);
-                }
+                let rms = downmix_into_buffer(data, channels, &mut buf);
+                drop(buf);
+                meter_clone.update(rms);
             },
             |err| log::error!("Audio stream error: {}", err),
             None,
@@ -54,6 +103,7 @@ impl AudioCapture {
         Ok(Self {
             _stream: stream,
             buffer,
+            meter,
             sample_rate,
         })
     }
@@ -69,6 +119,10 @@ impl AudioCapture {
         Ok(resampled)
     }
 
+    pub fn level_reader(&self) -> RecordingLevel {
+        self.meter.clone()
+    }
+
     #[allow(dead_code)]
     pub fn available_devices() -> Result<Vec<String>> {
         let host = cpal::default_host();
@@ -77,6 +131,28 @@ impl AudioCapture {
             .filter_map(|d| d.description().ok().map(|desc| desc.name().to_string()))
             .collect();
         Ok(names)
+    }
+}
+
+fn downmix_into_buffer(data: &[f32], channels: usize, buffer: &mut Vec<f32>) -> f32 {
+    if data.is_empty() || channels == 0 {
+        return 0.0;
+    }
+
+    let mut sum_squares = 0.0_f32;
+    let mut frames = 0_usize;
+
+    for chunk in data.chunks(channels) {
+        let sample: f32 = chunk.iter().sum::<f32>() / channels as f32;
+        buffer.push(sample);
+        sum_squares += sample * sample;
+        frames += 1;
+    }
+
+    if frames == 0 {
+        0.0
+    } else {
+        (sum_squares / frames as f32).sqrt()
     }
 }
 
@@ -97,4 +173,48 @@ fn resample_to_16k(input: &[f32], source_rate: u32) -> Vec<f32> {
         output.push(s0 + (s1 - s0) * frac as f32);
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{downmix_into_buffer, LevelMeter};
+
+    #[test]
+    fn meter_stays_near_zero_for_silence() {
+        let mut meter = LevelMeter::default();
+
+        assert_eq!(meter.update(0.0), 0.0);
+        assert_eq!(meter.level(), 0.0);
+    }
+
+    #[test]
+    fn stronger_input_produces_higher_level() {
+        let mut meter = LevelMeter::default();
+
+        let quiet = meter.update(0.02);
+        let louder = meter.update(0.12);
+
+        assert!(louder > quiet);
+    }
+
+    #[test]
+    fn meter_decay_is_smoothed() {
+        let mut meter = LevelMeter::default();
+
+        let peak = meter.update(0.2);
+        let decayed = meter.update(0.0);
+
+        assert!(peak > 0.0);
+        assert!(decayed > 0.0);
+        assert!(decayed < peak);
+    }
+
+    #[test]
+    fn downmix_returns_rms_for_mono_samples() {
+        let mut buffer = Vec::new();
+        let rms = downmix_into_buffer(&[0.5, -0.5, 0.5, -0.5], 1, &mut buffer);
+
+        assert_eq!(buffer, vec![0.5, -0.5, 0.5, -0.5]);
+        assert!((rms - 0.5).abs() < 0.0001);
+    }
 }

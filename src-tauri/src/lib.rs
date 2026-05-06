@@ -7,7 +7,7 @@ mod status;
 mod transcribe;
 mod transcripts;
 
-use audio::AudioCapture;
+use audio::{AudioCapture, RecordingLevel};
 use global_hotkey::{
     hotkey::{Code, HotKey, Modifiers},
     GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
@@ -85,7 +85,14 @@ struct WhisperingState {
     recording: Mutex<RecordingState>,
     transcriber: Mutex<Option<Transcriber>>,
     config: Mutex<settings::Config>,
+    session_anchor: Mutex<Option<status::SessionAnchor>>,
     status: Mutex<RuntimeStatus>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OverlayAnchorMode {
+    Session,
+    Fallback,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -97,6 +104,7 @@ pub fn run() {
         recording: Mutex::new(RecordingState::Idle),
         transcriber: Mutex::new(None),
         config: Mutex::new(config),
+        session_anchor: Mutex::new(None),
         status: Mutex::new(RuntimeStatus {
             phase: RuntimePhase::LoadingModel,
             last_error: None,
@@ -128,7 +136,13 @@ pub fn run() {
             build_tray(app.handle(), &config, &runtime_status)?;
             drop(runtime_status);
 
-            status::show(app.handle(), status::OverlayKind::Spinner, "Loading model");
+            status::show(
+                app.handle(),
+                status::OverlayKind::Spinner,
+                "Loading model",
+                None,
+                None,
+            );
             reload_transcriber(app.handle().clone(), state.clone());
 
             let handle = app.handle().clone();
@@ -176,6 +190,7 @@ fn build_tray(
                     name,
                     name
                     ),
+                    OverlayAnchorMode::Fallback,
                 );
             }
         })
@@ -308,7 +323,12 @@ fn reload_transcriber(handle: AppHandle, state: Arc<WhisperingState>) {
     set_phase(
         &handle,
         RuntimePhase::LoadingModel,
-        Some((status::OverlayKind::Spinner, "Loading model")),
+        Some((
+            status::OverlayKind::Spinner,
+            "Loading model",
+            OverlayAnchorMode::Fallback,
+            None,
+        )),
         false,
     );
 
@@ -321,6 +341,7 @@ fn reload_transcriber(handle: AppHandle, state: Arc<WhisperingState>) {
         Err(e) => report_error(
             &handle,
             format!("Could not load model {}: {}", model_path.display(), e),
+            OverlayAnchorMode::Fallback,
         ),
     });
 }
@@ -377,6 +398,28 @@ fn set_tray_icon(handle: &AppHandle, recording: bool) {
     }
 }
 
+fn spawn_meter_publisher(handle: AppHandle, level_reader: RecordingLevel) {
+    std::thread::spawn(move || loop {
+        let phase = handle
+            .state::<Arc<WhisperingState>>()
+            .status
+            .lock()
+            .unwrap()
+            .phase;
+        if phase != RuntimePhase::Recording {
+            break;
+        }
+
+        status::update(
+            &handle,
+            status::OverlayKind::Mic,
+            "Recording",
+            Some(level_reader.value()),
+        );
+        std::thread::sleep(Duration::from_millis(60));
+    });
+}
+
 fn toggle_recording(handle: AppHandle) {
     let state = handle.state::<Arc<WhisperingState>>();
     match take_toggle_action(&state) {
@@ -395,31 +438,57 @@ fn take_toggle_action(state: &WhisperingState) -> ToggleAction {
 
 fn start_recording(handle: &AppHandle, state: &WhisperingState) {
     if let Some(message) = current_busy_message(state) {
-        status::show(handle, status::OverlayKind::Spinner, message);
+        show_overlay(
+            handle,
+            status::OverlayKind::Spinner,
+            message,
+            OverlayAnchorMode::Fallback,
+            None,
+        );
         return;
     }
 
     if state.transcriber.lock().unwrap().is_none() {
-        report_error(handle, "Whisper model is not available");
+        report_error(
+            handle,
+            "Whisper model is not available",
+            OverlayAnchorMode::Fallback,
+        );
         return;
     }
+
+    *state.session_anchor.lock().unwrap() = Some(status::capture_session_anchor(handle));
 
     let device = state.config.lock().unwrap().input_device.clone();
     match AudioCapture::start(device.as_deref()) {
         Ok(capture) => recording_started(handle, state, capture),
-        Err(e) => report_error(handle, format!("Failed to start recording: {}", e)),
+        Err(e) => {
+            clear_session_anchor(state);
+            report_error(
+                handle,
+                format!("Failed to start recording: {}", e),
+                OverlayAnchorMode::Fallback,
+            );
+        }
     }
 }
 
 fn recording_started(handle: &AppHandle, state: &WhisperingState, capture: AudioCapture) {
+    let level_reader = capture.level_reader();
     *state.recording.lock().unwrap() = RecordingState::Recording(capture);
     set_tray_icon(handle, true);
     set_phase(
         handle,
         RuntimePhase::Recording,
-        Some((status::OverlayKind::Mic, "Recording")),
+        Some((
+            status::OverlayKind::Mic,
+            "Recording",
+            OverlayAnchorMode::Session,
+            Some(0.0),
+        )),
         false,
     );
+    spawn_meter_publisher(handle.clone(), level_reader);
     sounds::play_start();
     log::info!("Recording started");
 }
@@ -429,7 +498,12 @@ fn stop_recording(handle: &AppHandle, state: &Arc<WhisperingState>, capture: Aud
     set_phase(
         handle,
         RuntimePhase::Transcribing,
-        Some((status::OverlayKind::Spinner, "Transcribing")),
+        Some((
+            status::OverlayKind::Spinner,
+            "Transcribing",
+            OverlayAnchorMode::Session,
+            None,
+        )),
         false,
     );
     sounds::play_stop();
@@ -444,7 +518,11 @@ fn process_recording(handle: AppHandle, state: Arc<WhisperingState>, capture: Au
     let audio = match capture.stop() {
         Ok(audio) => audio,
         Err(e) => {
-            report_error(&handle, format!("Failed to stop audio capture: {}", e));
+            report_error(
+                &handle,
+                format!("Failed to stop audio capture: {}", e),
+                OverlayAnchorMode::Session,
+            );
             return;
         }
     };
@@ -462,6 +540,7 @@ fn transcribe_audio(handle: &AppHandle, state: &WhisperingState, audio: &[f32]) 
             report_error(
                 handle,
                 "Model not loaded yet; recording was not transcribed",
+                OverlayAnchorMode::Session,
             );
             return;
         };
@@ -474,8 +553,12 @@ fn transcribe_audio(handle: &AppHandle, state: &WhisperingState, audio: &[f32]) 
 fn handle_transcription_result(handle: &AppHandle, result: anyhow::Result<String>) {
     match result {
         Ok(text) if !text.is_empty() => save_and_type_text(handle, &text),
-        Ok(_) => report_error(handle, "No speech detected"),
-        Err(e) => report_error(handle, format!("Transcription failed: {}", e)),
+        Ok(_) => report_error(handle, "No speech detected", OverlayAnchorMode::Session),
+        Err(e) => report_error(
+            handle,
+            format!("Transcription failed: {}", e),
+            OverlayAnchorMode::Session,
+        ),
     }
 }
 
@@ -485,13 +568,22 @@ fn save_and_type_text(handle: &AppHandle, text: &str) {
     set_phase(
         handle,
         RuntimePhase::Typing,
-        Some((status::OverlayKind::Spinner, "Typing")),
+        Some((
+            status::OverlayKind::Spinner,
+            "Typing",
+            OverlayAnchorMode::Session,
+            None,
+        )),
         false,
     );
 
     match inject::type_text(text) {
         Ok(()) if saved_path.is_some() => show_success(handle, "Typed"),
-        Ok(()) => report_error(handle, "Transcription was typed, but recovery save failed"),
+        Ok(()) => report_error(
+            handle,
+            "Transcription was typed, but recovery save failed",
+            OverlayAnchorMode::Session,
+        ),
         Err(e) => report_injection_error(handle, e, saved_path),
     }
 }
@@ -517,6 +609,7 @@ fn report_injection_error(handle: &AppHandle, error: anyhow::Error, saved_path: 
     report_error(
         handle,
         format!("Failed to inject text: {}.{}", error, recovery),
+        OverlayAnchorMode::Session,
     );
 }
 
@@ -533,10 +626,40 @@ fn busy_message(phase: RuntimePhase) -> Option<&'static str> {
     }
 }
 
+fn show_overlay(
+    handle: &AppHandle,
+    kind: status::OverlayKind,
+    message: &str,
+    anchor_mode: OverlayAnchorMode,
+    level: Option<f32>,
+) {
+    let state = handle.state::<Arc<WhisperingState>>();
+    let anchor = match anchor_mode {
+        OverlayAnchorMode::Session => *state.session_anchor.lock().unwrap(),
+        OverlayAnchorMode::Fallback => None,
+    };
+
+    status::show(handle, kind, message, anchor, level);
+}
+
+fn clear_session_anchor(state: &WhisperingState) {
+    *state.session_anchor.lock().unwrap() = None;
+}
+
+fn should_clear_session_anchor(
+    phase: RuntimePhase,
+    overlay_anchor_mode: Option<OverlayAnchorMode>,
+) -> bool {
+    matches!(
+        (phase, overlay_anchor_mode),
+        (RuntimePhase::Idle, None) | (RuntimePhase::Error, Some(OverlayAnchorMode::Fallback))
+    )
+}
+
 fn set_phase(
     handle: &AppHandle,
     phase: RuntimePhase,
-    overlay: Option<(status::OverlayKind, &str)>,
+    overlay: Option<(status::OverlayKind, &str, OverlayAnchorMode, Option<f32>)>,
     clear_error: bool,
 ) {
     let state = handle.state::<Arc<WhisperingState>>();
@@ -548,9 +671,16 @@ fn set_phase(
         }
     }
 
+    let overlay_anchor_mode = overlay.map(|(_, _, anchor_mode, _)| anchor_mode);
+    if should_clear_session_anchor(phase, overlay_anchor_mode) {
+        clear_session_anchor(&state);
+    }
+
     rebuild_tray_menu(handle);
     match overlay {
-        Some((kind, message)) => status::show(handle, kind, message),
+        Some((kind, message, anchor_mode, level)) => {
+            show_overlay(handle, kind, message, anchor_mode, level)
+        }
         None => status::hide(handle),
     }
 }
@@ -559,7 +689,12 @@ fn show_success(handle: &AppHandle, message: &str) {
     set_phase(
         handle,
         RuntimePhase::Idle,
-        Some((status::OverlayKind::Success, message)),
+        Some((
+            status::OverlayKind::Success,
+            message,
+            OverlayAnchorMode::Session,
+            None,
+        )),
         true,
     );
 
@@ -575,11 +710,12 @@ fn show_success(handle: &AppHandle, message: &str) {
             == RuntimePhase::Idle
         {
             status::hide(&handle);
+            clear_session_anchor(&handle.state::<Arc<WhisperingState>>());
         }
     });
 }
 
-fn report_error(handle: &AppHandle, message: impl Into<String>) {
+fn report_error(handle: &AppHandle, message: impl Into<String>, anchor_mode: OverlayAnchorMode) {
     let message = message.into();
     log::error!("{}", message);
 
@@ -590,8 +726,18 @@ fn report_error(handle: &AppHandle, message: impl Into<String>) {
         runtime_status.last_error = Some(message.clone());
     }
 
+    if should_clear_session_anchor(RuntimePhase::Error, Some(anchor_mode)) {
+        clear_session_anchor(&state);
+    }
+
     rebuild_tray_menu(handle);
-    status::show(handle, status::OverlayKind::Error, &short_message(&message));
+    show_overlay(
+        handle,
+        status::OverlayKind::Error,
+        &short_message(&message),
+        anchor_mode,
+        None,
+    );
 
     let handle = handle.clone();
     std::thread::spawn(move || {
@@ -622,7 +768,9 @@ fn short_message(message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{busy_message, short_message, RuntimePhase};
+    use super::{
+        busy_message, short_message, should_clear_session_anchor, OverlayAnchorMode, RuntimePhase,
+    };
 
     #[test]
     fn busy_message_identifies_non_recordable_phases() {
@@ -653,5 +801,22 @@ mod tests {
     fn short_message_truncates_long_text() {
         let message = "a".repeat(73);
         assert_eq!(short_message(&message), format!("{}...", "a".repeat(72)));
+    }
+
+    #[test]
+    fn session_anchor_is_retained_for_session_errors() {
+        assert!(!should_clear_session_anchor(
+            RuntimePhase::Error,
+            Some(OverlayAnchorMode::Session)
+        ));
+    }
+
+    #[test]
+    fn session_anchor_is_cleared_when_session_finishes() {
+        assert!(should_clear_session_anchor(RuntimePhase::Idle, None));
+        assert!(should_clear_session_anchor(
+            RuntimePhase::Error,
+            Some(OverlayAnchorMode::Fallback)
+        ));
     }
 }
