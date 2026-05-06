@@ -23,6 +23,7 @@ make clippy        # clippy with -D warnings across all Rust targets
 make clippy-review # extended Rust review lint pass
 make fmt           # apply rustfmt
 make fmt-check     # check rustfmt without rewriting
+make check         # frontend build, rustfmt check, clippy, and tests without formatting writes
 make test          # run Rust tests
 make release       # bundle .app and build DMG
 make install       # download ggml-medium.bin model
@@ -51,6 +52,18 @@ Use `make clippy-review` for deeper Rust review. It enables `clippy::all`, `clip
 - Do not use `unwrap()` in new non-test code unless the invariant is local and obvious; prefer error handling or `expect("reason")`.
 - Avoid `let _ =` on fallible operations unless failure is deliberately non-fatal and logged nearby.
 - Put pure decision logic in standalone functions where possible so behavior can be unit tested without Tauri, audio, filesystem, or model dependencies.
+
+## Code Quality
+
+After completing any task that touches Rust code, run:
+
+```bash
+make fmt    # format code in place
+make lint   # frontend build, rustfmt check, clippy with --deny warnings, and tests
+make test   # run all tests
+```
+
+All three must pass before a task is considered done. Fix all warnings - do not use `#[allow(...)]` to silence clippy without a documented reason.
 
 ## Architecture
 

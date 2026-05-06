@@ -7,7 +7,7 @@ CARGO_FLAGS := --locked --manifest-path $(CARGO_MANIFEST)
 APP_BUNDLE := src-tauri/target/release/bundle/macos/Whispering.app
 APPLICATIONS_APP := /Applications/Whispering.app
 
-.PHONY: install install-model install-app reinstall build dev release frontend frontend-deps fmt fmt-check check clippy clippy-review test lint clean clean-accessibility clean-permissions
+.PHONY: install install-model install-app reinstall build dev release frontend frontend-deps fmt fmt-check cargo-check check clippy clippy-review test lint clean clean-accessibility clean-permissions
 
 ## Download the default whisper.cpp model (medium multilingual) to ~/.whispering/models/
 install: install-model
@@ -49,8 +49,8 @@ frontend: frontend-deps
 	npm run build
 
 frontend-deps:
-	@if [ ! -d node_modules ]; then \
-		npm install; \
+	@if [ ! -d node_modules ] || [ package-lock.json -nt node_modules ] || [ package.json -nt node_modules ]; then \
+		npm ci; \
 	fi
 
 fmt:
@@ -59,8 +59,11 @@ fmt:
 fmt-check:
 	cargo fmt --manifest-path $(CARGO_MANIFEST) -- --check
 
-check:
+cargo-check:
 	cargo check $(CARGO_FLAGS)
+
+## CI-safe validation without rewriting files
+check: frontend fmt-check clippy test
 
 clippy:
 	cargo clippy $(CARGO_FLAGS) --all-targets -- -D warnings
@@ -71,8 +74,8 @@ clippy-review:
 test:
 	cargo test $(CARGO_FLAGS)
 
-## Run frontend dependency bootstrap, frontend build, rustfmt check, clippy, and tests
-lint: frontend-deps frontend fmt-check clippy test
+## Full validation gate for local work
+lint: frontend-deps check
 
 ## Remove build artifacts
 clean:
