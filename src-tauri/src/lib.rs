@@ -1,6 +1,7 @@
 mod audio;
 mod inject;
 mod permissions;
+mod platform;
 mod settings;
 mod sounds;
 mod status;
@@ -8,10 +9,8 @@ mod transcribe;
 mod transcripts;
 
 use audio::{AudioCapture, RecordingLevel};
-use global_hotkey::{
-    hotkey::{Code, HotKey, Modifiers},
-    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
-};
+use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
+use platform::PlatformRuntime;
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -82,6 +81,7 @@ struct RuntimeStatus {
 }
 
 struct WhisperingState {
+    runtime: PlatformRuntime,
     recording: Mutex<RecordingState>,
     transcriber: Mutex<Option<Transcriber>>,
     config: Mutex<settings::Config>,
@@ -97,10 +97,13 @@ enum OverlayAnchorMode {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    settings::ensure_dirs().ok();
-    let config = settings::load();
+    let runtime = PlatformRuntime::detect();
+    let environment = runtime.environment().clone();
+    settings::ensure_dirs(&environment).ok();
+    let config = settings::load(&environment);
 
     let state = Arc::new(WhisperingState {
+        runtime,
         recording: Mutex::new(RecordingState::Idle),
         transcriber: Mutex::new(None),
         config: Mutex::new(config),
@@ -114,30 +117,34 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state.clone())
         .setup(move |app| {
+            state.runtime.log_startup();
+            state.runtime.configure_app(app);
+
             {
                 let mut cfg = state.config.lock().unwrap();
-                permissions::request_accessibility(&mut cfg);
-                if let Err(err) = settings::save(&cfg) {
+                state.runtime.request_permissions(&mut cfg);
+                if let Err(err) = settings::save(state.runtime.environment(), &cfg) {
                     log::error!("Failed to save permission prompt state: {}", err);
                 }
             }
-            permissions::request_microphone();
-
-            #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let manager = GlobalHotKeyManager::new()?;
-            let hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::META), Code::KeyM);
-            manager.register(hotkey)?;
+            manager.register(state.runtime.environment().default_hotkey.hotkey())?;
             app.manage(manager);
 
             let config = state.config.lock().unwrap().clone();
             let runtime_status = state.status.lock().unwrap();
-            build_tray(app.handle(), &config, &runtime_status)?;
+            build_tray(
+                app.handle(),
+                &config,
+                &runtime_status,
+                state.runtime.environment(),
+            )?;
             drop(runtime_status);
 
             status::show(
                 app.handle(),
+                state.runtime.status_surface_mode(),
                 status::OverlayKind::Spinner,
                 "Loading model",
                 None,
@@ -164,12 +171,32 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+pub fn startup_probe() -> anyhow::Result<String> {
+    let runtime = PlatformRuntime::detect();
+    let environment = runtime.environment().clone();
+    settings::ensure_dirs(&environment)?;
+    let config = settings::load(&environment);
+
+    Ok(format!(
+        "platform={}\narch={}\nhotkey={}\nconfig_dir={}\nmodel_dir={}\ncache_dir={}\nmodel_path={}",
+        environment.platform.as_str(),
+        environment.arch,
+        environment.default_hotkey.label(),
+        environment.config_dir.display(),
+        environment.model_dir.display(),
+        environment.cache_dir.display(),
+        config.model_path.display()
+    ))
+}
+
 fn build_tray(
     handle: &AppHandle,
     config: &settings::Config,
     status: &RuntimeStatus,
+    environment: &platform::RuntimeEnvironment,
 ) -> tauri::Result<()> {
-    let menu = build_menu(handle, config, status)?;
+    let menu = build_menu(handle, config, status, environment)?;
+    let model_dir = environment.model_dir.clone();
 
     TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
@@ -186,9 +213,10 @@ fn build_tray(
                 report_error(
                     app,
                     format!(
-                        "Model {} is not installed. Use `make install` for {} or place it in ~/.whispering/models/",
-                    name,
-                    name
+                        "Model {} is not installed. Use `make install` for {} or place it in {}.",
+                        name,
+                        name,
+                        model_dir.display()
                     ),
                     OverlayAnchorMode::Fallback,
                 );
@@ -203,6 +231,7 @@ fn build_menu(
     handle: &AppHandle,
     config: &settings::Config,
     status: &RuntimeStatus,
+    environment: &platform::RuntimeEnvironment,
 ) -> tauri::Result<Menu<tauri::Wry>> {
     let toggle = MenuItem::with_id(
         handle,
@@ -212,8 +241,12 @@ fn build_menu(
         None::<&str>,
     )?;
 
-    let model_items =
-        build_models_menu_items(handle, &config.model_path, status.phase.models_enabled())?;
+    let model_items = build_models_menu_items(
+        handle,
+        &config.model_path,
+        status.phase.models_enabled(),
+        environment,
+    )?;
     let model_refs = model_items
         .iter()
         .map(|item| item as &dyn IsMenuItem<_>)
@@ -230,8 +263,9 @@ fn build_models_menu_items(
     handle: &AppHandle,
     selected_path: &Path,
     enabled: bool,
+    environment: &platform::RuntimeEnvironment,
 ) -> tauri::Result<Vec<CheckMenuItem<tauri::Wry>>> {
-    let installed_models = settings::installed_models();
+    let installed_models = settings::installed_models(environment);
     let mut items = Vec::new();
 
     for model in installed_models.iter() {
@@ -260,11 +294,11 @@ fn build_models_menu_items(
     for (name, path) in [
         (
             settings::DEFAULT_MULTILINGUAL_MODEL_NAME,
-            settings::default_multilingual_model_path(),
+            settings::default_multilingual_model_path(environment),
         ),
         (
             settings::DEFAULT_ENGLISH_MODEL_NAME,
-            settings::default_english_model_path(),
+            settings::default_english_model_path(environment),
         ),
     ] {
         if path.exists() {
@@ -304,7 +338,7 @@ fn rebuild_tray_menu(handle: &AppHandle) {
         let state = handle.state::<Arc<WhisperingState>>();
         let config = state.config.lock().unwrap().clone();
         let status = state.status.lock().unwrap();
-        match build_menu(handle, &config, &status) {
+        match build_menu(handle, &config, &status, state.runtime.environment()) {
             Ok(menu) => {
                 let _ = tray.set_menu(Some(menu));
             }
@@ -353,7 +387,7 @@ fn graceful_shutdown(handle: &AppHandle) {
     if matches!(*recording, RecordingState::Recording(_)) {
         let prev = std::mem::replace(&mut *recording, RecordingState::Idle);
         drop(recording);
-        sounds::play_stop();
+        state.runtime.play_stop_sound();
         if let RecordingState::Recording(capture) = prev {
             drop(capture);
         }
@@ -367,7 +401,7 @@ fn set_model(handle: &AppHandle, model_path: PathBuf) {
     let config = {
         let mut cfg = state.config.lock().unwrap();
         cfg.model_path = model_path;
-        if let Err(err) = settings::save(&cfg) {
+        if let Err(err) = settings::save(state.runtime.environment(), &cfg) {
             log::error!("Failed to save model setting: {}", err);
         }
         cfg.clone()
@@ -457,7 +491,8 @@ fn start_recording(handle: &AppHandle, state: &WhisperingState) {
         return;
     }
 
-    *state.session_anchor.lock().unwrap() = Some(status::capture_session_anchor(handle));
+    *state.session_anchor.lock().unwrap() =
+        status::capture_session_anchor(state.runtime.status_surface_mode());
 
     let device = state.config.lock().unwrap().input_device.clone();
     match AudioCapture::start(device.as_deref()) {
@@ -489,7 +524,7 @@ fn recording_started(handle: &AppHandle, state: &WhisperingState, capture: Audio
         false,
     );
     spawn_meter_publisher(handle.clone(), level_reader);
-    sounds::play_start();
+    state.runtime.play_start_sound();
     log::info!("Recording started");
 }
 
@@ -506,7 +541,7 @@ fn stop_recording(handle: &AppHandle, state: &Arc<WhisperingState>, capture: Aud
         )),
         false,
     );
-    sounds::play_stop();
+    state.runtime.play_stop_sound();
     log::info!("Recording stopped, transcribing...");
 
     let handle = handle.clone();
@@ -563,7 +598,7 @@ fn handle_transcription_result(handle: &AppHandle, result: anyhow::Result<String
 }
 
 fn save_and_type_text(handle: &AppHandle, text: &str) {
-    let saved_path = save_transcript(text);
+    let saved_path = save_transcript(handle, text);
 
     set_phase(
         handle,
@@ -588,8 +623,9 @@ fn save_and_type_text(handle: &AppHandle, text: &str) {
     }
 }
 
-fn save_transcript(text: &str) -> Option<PathBuf> {
-    match transcripts::save(text) {
+fn save_transcript(handle: &AppHandle, text: &str) -> Option<PathBuf> {
+    let state = handle.state::<Arc<WhisperingState>>();
+    match transcripts::save(text, &state.runtime.environment().cache_dir) {
         Ok(path) => {
             log::info!("Saved transcript to {}", path.display());
             Some(path)
@@ -639,7 +675,14 @@ fn show_overlay(
         OverlayAnchorMode::Fallback => None,
     };
 
-    status::show(handle, kind, message, anchor, level);
+    status::show(
+        handle,
+        state.runtime.status_surface_mode(),
+        kind,
+        message,
+        anchor,
+        level,
+    );
 }
 
 fn clear_session_anchor(state: &WhisperingState) {

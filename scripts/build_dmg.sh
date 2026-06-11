@@ -6,6 +6,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="${1:-$ROOT_DIR/src-tauri/target/release/bundle/macos/Whispering.app}"
 DMG_DIR="$ROOT_DIR/src-tauri/target/release/bundle/dmg"
 
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "build_dmg.sh is only supported on macOS" >&2
+  exit 1
+fi
+
 if [[ ! -d "$APP_PATH" ]]; then
   echo "App bundle not found: $APP_PATH" >&2
   exit 1

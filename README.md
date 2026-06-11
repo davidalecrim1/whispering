@@ -1,114 +1,146 @@
 # Whispering
 
-Whispering is a macOS menu bar speech-to-text app built with Tauri and Rust. It records from the microphone, runs Whisper locally with `whisper-rs`, and types the transcription at the current cursor position.
+Whispering is a local speech-to-text app built with Tauri, Rust, and `whisper-rs`. It records from the microphone, transcribes with Whisper, and types the result at the focused cursor.
+
+The repo now has OS-aware runtime routing and OS-aware Makefile targets for `macos`, `windows`, and `linux`. The main goal is simple local usage: clone the repo, build it, install the model, and run it.
 
 ## What You Need
 
-- macOS 10.15 or newer
-- Rust toolchain (`rustup`)
+- Rust toolchain via `rustup`
 - Node.js and npm
 - Tauri CLI (`cargo install tauri-cli`)
 - A local Whisper ggml model file
 
-This app is macOS-only. The current implementation depends on macOS permissions, tray APIs, Metal-backed Whisper inference, and a minimum macOS version of 10.15.
+macOS-specific runtime expectations:
+
+- macOS 10.15 or newer
+- Accessibility permission for text injection
+- Microphone permission for recording
+
+Linux build prerequisites:
+
+- WebKitGTK and tray-related development packages
+- AppImage-compatible Linux desktop environment
+- A desktop environment with system tray support is preferred, but the app falls back to a floating status surface when tray behavior is limited
+
+On Debian or Ubuntu hosts, install the packages Tauri documents for Linux builds:
+
+```bash
+sudo apt update
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+Windows build prerequisites:
+
+- PowerShell
+- Microsoft C++ Build Tools with "Desktop development with C++"
+- Microsoft Edge WebView2 runtime
+- Desktop install permissions for MSI packages on the current machine
+- If MSI bundling fails with `light.exe` errors, enable the Windows VBSCRIPT optional feature
 
 ## Get Started
+
 Clone the repo, then from the repo root:
 
 ```bash
-npm install
 make install
-make dev
 ```
 
-`make install` downloads the default multilingual model to `~/.whispering/models/ggml-medium.bin`.
+`make install` detects the current OS and runs the full platform install flow. It installs the default model, builds the native release artifact for the host OS, installs the app, and prints how to launch it.
 
-Useful commands:
+`make run` remains the source-run path for local development. Use `make run-macos-app`, `make run-linux-app`, or `make run-windows-app` to launch the installed app.
+
+If you want to bypass auto-detection, use one of:
 
 ```bash
-make dev      # run the app in development mode
-make build    # debug build
-make release  # build the macOS app bundle and DMG
-make lint     # frontend typecheck/build + cargo fmt + clippy -D warnings
-make clippy-review # extended Rust review lint pass
-make clean    # remove build artifacts
+make install-model-macos
+make install-model-linux
+make install-model-windows
+make install-macos
+make install-linux
+make install-windows
 ```
 
-If you prefer raw Cargo commands:
+## Useful Commands
 
 ```bash
-cargo build --manifest-path src-tauri/Cargo.toml
-cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+make build          # debug build
+make install        # detect the host OS and run the full platform install flow
+make install-model  # detect the host OS and install only the default model
+make run            # run the app from the repo
+make dev            # alias for running in development mode
+make release        # detect the host OS and dispatch to a release target
+make release-macos  # build the macOS app bundle and DMG
+make release-linux  # build the Linux AppImage release artifact on a Linux host
+make release-windows # build the Windows MSI release artifact on a Windows host
+make install-macos  # install the macOS app into /Applications
+make install-linux  # install the Linux AppImage into ~/.local/opt/Whispering
+make install-windows # install the Windows MSI on a Windows host
+make run-macos-app  # launch the installed macOS app
+make run-linux-app  # launch the installed Linux AppImage
+make run-windows-app # launch the installed Windows app
+make lint           # frontend build + rustfmt check + clippy -D warnings + tests
+make clean          # remove Rust build artifacts
 ```
 
-## Install the App on macOS
+## Platform Shortcuts
 
-To install a local build of the app instead of running `make dev`:
+Use the global shortcut below to start and stop recording:
 
-1. Build the release bundle:
+| Platform | Shortcut |
+|---|---|
+| macOS | `Ctrl+Cmd+M` |
+| Windows | `Ctrl+Alt+M` |
+| Linux | `Ctrl+Alt+M` |
+
+## Runtime Notes
+
+- The default config is stored at `~/.whispering/config.toml`.
+- Models are stored at `~/.whispering/models/`.
+- Transcript recovery files are stored under the resolved platform cache directory in `Whispering/transcripts/`.
+- Transcription uses `whisper-rs` on every supported OS. macOS enables the Metal backend; Linux and Windows use the shared non-Metal backend.
+
+## Install and Run on macOS
+
+To install a local macOS build and launch it like a normal app:
 
 ```bash
-make install
-make release
+make install-macos
 ```
 
-2. Find the app bundle at:
+The local app bundle is built at:
 
 ```text
 src-tauri/target/release/bundle/macos/Whispering.app
 ```
 
-3. Move `Whispering.app` into `/Applications` if you want it installed like a normal Mac app.
+Unsigned local builds may need to be opened once from Finder before macOS will trust them.
 
-4. Launch the app.
+## Install and Run on Linux
 
-For local unsigned builds, macOS may block the first launch. If that happens, open it from Finder with `Open`, then confirm the security prompt.
-
-Tauri also produces a DMG during `make release` under:
-
-```text
-src-tauri/target/release/bundle/dmg/
-```
-
-## First Run Checklist
-
-On startup, Whispering requests:
-
-- Accessibility access, so it can type text into the focused app
-- Microphone access, so it can record audio
-
-You need both permissions enabled in System Settings for the app to work correctly.
-
-The app also expects a model in:
-
-```text
-~/.whispering/models/
-```
-
-The default model is:
-
-```text
-ggml-medium.bin
-```
-
-If you also install an English-only model such as `ggml-medium.en.bin`, place it in the same directory. The tray menu will list installed models automatically.
-
-## How to Use It
-
-After launch, Whispering runs as a menu bar app with no Dock icon.
-
-- Press `Ctrl+Cmd+M` to start recording
-- Press `Ctrl+Cmd+M` again to stop recording and transcribe
-- The transcribed text is typed at the current cursor position
-- During recording and transcription, a small status popover appears under the menu-bar icon.
-- If text injection fails or focus was wrong, recover the last successful transcription with:
+Install the model, build the AppImage, install it into the user-local app path, and register the desktop entry:
 
 ```bash
-cat ~/Library/Caches/Whispering/transcripts/latest.txt
+make install-linux
+make run-linux-app
 ```
 
-## Notes
+Installed Linux paths:
 
-- The default config is stored at `~/.whispering/config.toml`.
-- Transcription recovery files are stored in `~/Library/Caches/Whispering/transcripts/`, so macOS can clean them when storage is needed.
+```text
+~/.local/opt/Whispering/Whispering.AppImage
+~/.local/share/applications/whispering.desktop
+```
+
+If the desktop entry is available in your environment, you can also launch Whispering from the applications menu.
+
+## Install and Run on Windows
+
+Install the model, build the MSI, run the installer, then launch the installed app:
+
+```bash
+make install-windows
+make run-windows-app
+```
+
+`make install-windows` runs the native MSI installer on a Windows host. After that, Whispering should be available from the Start menu and through `make run-windows-app`.

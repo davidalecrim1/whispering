@@ -5,6 +5,8 @@ use tauri::{
     Position, Rect, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry,
 };
 
+use crate::platform::StatusSurfaceMode;
+
 const OVERLAY_LABEL: &str = "status-overlay";
 const TRAY_ID: &str = "whispering-tray";
 const OVERLAY_WIDTH: f64 = 252.0;
@@ -45,44 +47,48 @@ struct OverlayPayload<'a> {
 
 pub fn show(
     handle: &AppHandle,
+    surface_mode: StatusSurfaceMode,
     kind: OverlayKind,
     message: &str,
     anchor: Option<SessionAnchor>,
     level: Option<f32>,
 ) {
-    if let Err(err) = show_inner(handle, kind, message, anchor, level) {
-        log::error!("Failed to show status overlay: {}", err);
+    if let Err(err) = show_inner(handle, surface_mode, kind, message, anchor, level) {
+        log::error!("Failed to show status surface: {}", err);
     }
 }
 
 pub fn update(handle: &AppHandle, kind: OverlayKind, message: &str, level: Option<f32>) {
     if let Err(err) = update_inner(handle, kind, message, level) {
-        log::error!("Failed to update status overlay: {}", err);
+        log::error!("Failed to update status surface: {}", err);
     }
 }
 
 pub fn hide(handle: &AppHandle) {
     if let Some(window) = handle.get_webview_window(OVERLAY_LABEL) {
         if let Err(err) = window.hide() {
-            log::error!("Failed to hide status overlay: {}", err);
+            log::error!("Failed to hide status surface: {}", err);
         }
     }
 }
 
-pub fn capture_session_anchor(handle: &AppHandle) -> SessionAnchor {
-    let _ = handle;
-    SessionAnchor::Tray
+pub fn capture_session_anchor(surface_mode: StatusSurfaceMode) -> Option<SessionAnchor> {
+    match surface_mode {
+        StatusSurfaceMode::TrayPreferred => Some(SessionAnchor::Tray),
+        StatusSurfaceMode::FloatingWindow => None,
+    }
 }
 
 fn show_inner(
     handle: &AppHandle,
+    surface_mode: StatusSurfaceMode,
     kind: OverlayKind,
     message: &str,
     anchor: Option<SessionAnchor>,
     level: Option<f32>,
 ) -> Result<()> {
     let window = ensure_overlay(handle)?;
-    position_overlay(handle, &window, anchor);
+    position_surface(handle, &window, surface_mode, anchor);
     dispatch_payload(&window, kind, message, level)?;
     window.show()?;
 
@@ -147,28 +153,33 @@ fn ensure_overlay(handle: &AppHandle) -> Result<WebviewWindow<Wry>> {
     Ok(window)
 }
 
-fn position_overlay(
+fn position_surface(
     handle: &AppHandle,
     window: &WebviewWindow<Wry>,
+    surface_mode: StatusSurfaceMode,
     anchor: Option<SessionAnchor>,
 ) {
-    let Some(position) = overlay_position(handle, anchor) else {
+    let Some(position) = surface_position(handle, surface_mode, anchor) else {
         return;
     };
 
     if let Err(err) = window.set_position(position) {
-        log::error!("Failed to position status overlay: {}", err);
+        log::error!("Failed to position status surface: {}", err);
     }
 }
 
-fn overlay_position(
+fn surface_position(
     handle: &AppHandle,
+    surface_mode: StatusSurfaceMode,
     anchor: Option<SessionAnchor>,
 ) -> Option<PhysicalPosition<f64>> {
-    match anchor.unwrap_or(SessionAnchor::Tray) {
-        SessionAnchor::Tray => {
-            tray_anchor_position(handle).or_else(|| primary_menu_bar_position(handle))
-        }
+    match surface_mode {
+        StatusSurfaceMode::TrayPreferred => match anchor.unwrap_or(SessionAnchor::Tray) {
+            SessionAnchor::Tray => {
+                tray_anchor_position(handle).or_else(|| floating_position(handle))
+            }
+        },
+        StatusSurfaceMode::FloatingWindow => floating_position(handle),
     }
 }
 
@@ -180,7 +191,7 @@ fn tray_anchor_position(handle: &AppHandle) -> Option<PhysicalPosition<f64>> {
     Some(tray_anchor_position_for_rect(position, size))
 }
 
-fn primary_menu_bar_position(handle: &AppHandle) -> Option<PhysicalPosition<f64>> {
+fn floating_position(handle: &AppHandle) -> Option<PhysicalPosition<f64>> {
     let monitor = handle.primary_monitor().ok()??;
     let origin = monitor.position();
     let size = monitor.size();
@@ -318,7 +329,10 @@ impl PhysicalMonitorBounds {
 
 #[cfg(test)]
 mod tests {
-    use super::{tray_anchor_position_for_rect, MENU_BAR_MARGIN, OVERLAY_WIDTH};
+    use super::{
+        capture_session_anchor, tray_anchor_position_for_rect, MENU_BAR_MARGIN, OVERLAY_WIDTH,
+    };
+    use crate::platform::StatusSurfaceMode;
     use tauri::PhysicalPosition;
     use tauri::PhysicalSize;
 
@@ -335,6 +349,14 @@ mod tests {
                 640.0 + 12.0 - OVERLAY_WIDTH / 2.0,
                 12.0 + 22.0 + MENU_BAR_MARGIN
             )
+        );
+    }
+
+    #[test]
+    fn floating_surfaces_do_not_capture_tray_anchor() {
+        assert_eq!(
+            capture_session_anchor(StatusSurfaceMode::FloatingWindow),
+            None
         );
     }
 }
