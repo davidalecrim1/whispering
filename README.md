@@ -64,34 +64,34 @@ make install-windows
 ## Useful Commands
 
 ```bash
-make build          # debug build
-make install        # detect the host OS and run the full platform install flow
-make install-model  # detect the host OS and install only the default model
-make run            # run the app from the repo
-make dev            # alias for running in development mode
-make release        # detect the host OS and dispatch to a release target
-make release-macos  # build the macOS app bundle and DMG
-make release-linux  # build the Linux AppImage release artifact on a Linux host
+make build           # debug build
+make install         # detect the host OS and run the full platform install flow
+make install-model   # detect the host OS and install only the default model
+make run             # run the app from the repo
+make dev             # alias for running in development mode
+make release         # detect the host OS and dispatch to a release target
+make release-macos   # build the macOS app bundle and DMG
+make release-linux   # build the Linux AppImage release artifact on a Linux host
 make release-windows # build the Windows MSI release artifact on a Windows host
-make install-macos  # install the macOS app into /Applications
-make install-linux  # install the Linux AppImage into ~/.local/opt/Whispering
+make install-macos   # install the macOS app into /Applications
+make install-linux   # install the Linux AppImage into ~/.local/opt/Whispering
 make install-windows # install the Windows MSI on a Windows host
-make run-macos-app  # launch the installed macOS app
-make run-linux-app  # launch the installed Linux AppImage
+make run-macos-app   # launch the installed macOS app
+make run-linux-app   # launch the installed Linux AppImage
 make run-windows-app # launch the installed Windows app
-make lint           # frontend build + rustfmt check + clippy -D warnings + tests
-make clean          # remove Rust build artifacts
+make lint            # frontend build + rustfmt check + clippy -D warnings + tests
+make clean           # remove Rust build artifacts
 ```
 
 ## Platform Shortcuts
 
 Use the global shortcut below to start and stop recording:
 
-| Platform | Shortcut |
-|---|---|
-| macOS | `Ctrl+Cmd+M` |
-| Windows | `Ctrl+Alt+M` |
-| Linux | `Ctrl+Alt+M` |
+| Platform | Shortcut     |
+| -------- | ------------ |
+| macOS    | `Ctrl+Cmd+M` |
+| Windows  | `Ctrl+Alt+M` |
+| Linux    | `Ctrl+Alt+M` |
 
 ## Runtime Notes
 

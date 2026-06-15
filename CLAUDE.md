@@ -96,18 +96,18 @@ This is cache data so the OS may clean it under storage pressure. Do not save ra
 
 ## Module Responsibilities
 
-| Module | Responsibility |
-|---|---|
-| `lib.rs` | App entry, tray setup, hotkey loop, state transitions, transcription flow |
-| `audio.rs` | `AudioCapture`: cpal stream open/close, PCM buffering, resample to 16kHz |
-| `transcribe.rs` | `Transcriber`: load whisper.cpp model, run inference |
-| `inject.rs` | `type_text()`: enigo keystroke injection at focused cursor |
-| `settings.rs` | Config load/save, model discovery, model language behavior |
-| `permissions.rs` | Accessibility and microphone permission prompts |
-| `sounds.rs` | Start/stop system sounds |
-| `status.rs` | Shared status surface rendering and positioning |
-| `transcripts.rs` | Platform-resolved cache transcript recovery writes |
-| `platform/` | OS detection, runtime capabilities, and per-platform behavior |
+| Module           | Responsibility                                                            |
+|------------------|---------------------------------------------------------------------------|
+| `lib.rs`         | App entry, tray setup, hotkey loop, state transitions, transcription flow |
+| `audio.rs`       | `AudioCapture`: cpal stream open/close, PCM buffering, resample to 16kHz |
+| `transcribe.rs`  | `Transcriber`: load whisper.cpp model, run inference                      |
+| `inject.rs`      | `type_text()`: enigo keystroke injection at focused cursor                |
+| `settings.rs`    | Config load/save, model discovery, model language behavior                |
+| `permissions.rs` | Accessibility and microphone permission prompts                           |
+| `sounds.rs`      | Start/stop system sounds                                                  |
+| `status.rs`      | Shared status surface rendering and positioning                           |
+| `transcripts.rs` | Platform-resolved cache transcript recovery writes                        |
+| `platform/`      | OS detection, runtime capabilities, and per-platform behavior             |
 
 ## Runtime Prerequisites
 
