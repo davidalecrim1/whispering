@@ -62,7 +62,7 @@ impl RuntimePhase {
             Self::Recording => "Stop Recording",
             Self::Transcribing => "Transcribing...",
             Self::Typing => "Typing...",
-            Self::Error => "Error",
+            Self::Error => "Start Recording",
         }
     }
 
@@ -366,7 +366,8 @@ fn reload_transcriber(handle: AppHandle, state: Arc<WhisperingState>) {
         false,
     );
 
-    std::thread::spawn(move || match Transcriber::load(&model_path) {
+    std::thread::spawn(move || {
+        match Transcriber::load(&model_path) {
         Ok(t) => {
             *state.transcriber.lock().unwrap() = Some(t);
             log::info!("Whisper model loaded from {}", model_path.display());
@@ -374,9 +375,14 @@ fn reload_transcriber(handle: AppHandle, state: Arc<WhisperingState>) {
         }
         Err(e) => report_error(
             &handle,
-            format!("Could not load model {}: {}", model_path.display(), e),
+            format!(
+                "A model loading error happened... Could not load {}: {}. Install or select a model in Models and try again.",
+                model_path.display(),
+                e
+            ),
             OverlayAnchorMode::Fallback,
         ),
+    }
     });
 }
 
@@ -485,7 +491,7 @@ fn start_recording(handle: &AppHandle, state: &WhisperingState) {
     if state.transcriber.lock().unwrap().is_none() {
         report_error(
             handle,
-            "Whisper model is not available",
+            "A model loading error happened... Whispering could not find a ready model. Install or select a model in Models and try again.",
             OverlayAnchorMode::Fallback,
         );
         return;
@@ -591,7 +597,7 @@ fn handle_transcription_result(handle: &AppHandle, result: anyhow::Result<String
         Ok(_) => report_error(handle, "No speech detected", OverlayAnchorMode::Session),
         Err(e) => report_error(
             handle,
-            format!("Transcription failed: {}", e),
+            format!("A transcription error happened... {}", e),
             OverlayAnchorMode::Session,
         ),
     }
@@ -777,7 +783,7 @@ fn report_error(handle: &AppHandle, message: impl Into<String>, anchor_mode: Ove
     show_overlay(
         handle,
         status::OverlayKind::Error,
-        &short_message(&message),
+        &message,
         anchor_mode,
         None,
     );
@@ -798,22 +804,9 @@ fn report_error(handle: &AppHandle, message: impl Into<String>, anchor_mode: Ove
     });
 }
 
-fn short_message(message: &str) -> String {
-    const MAX_CHARS: usize = 72;
-    let mut chars = message.chars();
-    let short = chars.by_ref().take(MAX_CHARS).collect::<String>();
-    if chars.next().is_some() {
-        format!("{}...", short)
-    } else {
-        short
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        busy_message, short_message, should_clear_session_anchor, OverlayAnchorMode, RuntimePhase,
-    };
+    use super::{busy_message, should_clear_session_anchor, OverlayAnchorMode, RuntimePhase};
 
     #[test]
     fn busy_message_identifies_non_recordable_phases() {
@@ -833,17 +826,6 @@ mod tests {
         assert_eq!(busy_message(RuntimePhase::Idle), None);
         assert_eq!(busy_message(RuntimePhase::Recording), None);
         assert_eq!(busy_message(RuntimePhase::Error), None);
-    }
-
-    #[test]
-    fn short_message_preserves_short_text() {
-        assert_eq!(short_message("model failed"), "model failed");
-    }
-
-    #[test]
-    fn short_message_truncates_long_text() {
-        let message = "a".repeat(73);
-        assert_eq!(short_message(&message), format!("{}...", "a".repeat(72)));
     }
 
     #[test]

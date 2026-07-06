@@ -104,7 +104,7 @@ export function App() {
                 icons.error
               )}
             </div>
-            <div className="message">{status.message}</div>
+            <div className="message message-detail">{status.message}</div>
           </>
         )}
       </section>

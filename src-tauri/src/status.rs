@@ -1,16 +1,18 @@
 use anyhow::Result;
 use serde::Serialize;
 use tauri::{
-    tray::TrayIconId, AppHandle, LogicalPosition, Manager, PhysicalPosition, PhysicalSize,
-    Position, Rect, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry,
+    tray::TrayIconId, AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition,
+    PhysicalSize, Position, Rect, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry,
 };
 
 use crate::platform::StatusSurfaceMode;
 
 const OVERLAY_LABEL: &str = "status-overlay";
 const TRAY_ID: &str = "whispering-tray";
-const OVERLAY_WIDTH: f64 = 252.0;
-const OVERLAY_HEIGHT: f64 = 88.0;
+const OVERLAY_MIN_WIDTH: f64 = 252.0;
+const OVERLAY_MAX_WIDTH: f64 = 520.0;
+const OVERLAY_MIN_HEIGHT: f64 = 88.0;
+const OVERLAY_MAX_HEIGHT: f64 = 220.0;
 const MENU_BAR_MARGIN: f64 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -88,6 +90,7 @@ fn show_inner(
     level: Option<f32>,
 ) -> Result<()> {
     let window = ensure_overlay(handle)?;
+    resize_overlay(&window, kind, message)?;
     position_surface(handle, &window, surface_mode, anchor);
     dispatch_payload(&window, kind, message, level)?;
     window.show()?;
@@ -105,6 +108,7 @@ fn update_inner(
         return Ok(());
     };
 
+    resize_overlay(&window, kind, message)?;
     dispatch_payload(&window, kind, message, level)
 }
 
@@ -136,9 +140,7 @@ fn ensure_overlay(handle: &AppHandle) -> Result<WebviewWindow<Wry>> {
     let window =
         WebviewWindowBuilder::new(handle, OVERLAY_LABEL, WebviewUrl::App("index.html".into()))
             .title("Whispering Status")
-            .inner_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
-            .min_inner_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
-            .max_inner_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
+            .inner_size(OVERLAY_MIN_WIDTH, OVERLAY_MIN_HEIGHT)
             .decorations(false)
             .resizable(false)
             .transparent(true)
@@ -151,6 +153,35 @@ fn ensure_overlay(handle: &AppHandle) -> Result<WebviewWindow<Wry>> {
             .build()?;
 
     Ok(window)
+}
+
+fn resize_overlay(window: &WebviewWindow<Wry>, kind: OverlayKind, message: &str) -> Result<()> {
+    let size = overlay_size(kind, message);
+    let size = Size::Logical(size);
+    window.set_size(size)?;
+    window.set_min_size(Some(size))?;
+    window.set_max_size(Some(size))?;
+    Ok(())
+}
+
+fn overlay_size(kind: OverlayKind, message: &str) -> LogicalSize<f64> {
+    if matches!(kind, OverlayKind::Mic) {
+        return LogicalSize::new(OVERLAY_MIN_WIDTH, OVERLAY_MIN_HEIGHT);
+    }
+
+    let estimated_width =
+        OVERLAY_MIN_WIDTH + (message.chars().count().saturating_sub(28) as f64 * 4.4);
+    let width = estimated_width.clamp(OVERLAY_MIN_WIDTH, OVERLAY_MAX_WIDTH);
+    let chars_per_line = (((width - 76.0) / 7.0).floor() as usize).max(1);
+    let line_count = message
+        .lines()
+        .map(|line| line.chars().count().max(1).div_ceil(chars_per_line))
+        .sum::<usize>()
+        .clamp(1, 6);
+    let height = (OVERLAY_MIN_HEIGHT + (line_count.saturating_sub(1) as f64 * 18.0))
+        .clamp(OVERLAY_MIN_HEIGHT, OVERLAY_MAX_HEIGHT);
+
+    LogicalSize::new(width, height)
 }
 
 fn position_surface(
@@ -187,15 +218,25 @@ fn tray_anchor_position(handle: &AppHandle) -> Option<PhysicalPosition<f64>> {
     let tray = handle.tray_by_id(&TrayIconId::new(TRAY_ID))?;
     let rect = tray.rect().ok()??;
     let (position, size) = physical_rect(handle, rect)?;
+    let overlay = handle
+        .get_webview_window(OVERLAY_LABEL)
+        .and_then(|window| window.outer_size().ok())
+        .map(|size| size.cast::<f64>())
+        .unwrap_or_else(|| PhysicalSize::new(OVERLAY_MIN_WIDTH, OVERLAY_MIN_HEIGHT));
 
-    Some(tray_anchor_position_for_rect(position, size))
+    Some(tray_anchor_position_for_rect(position, size, overlay))
 }
 
 fn floating_position(handle: &AppHandle) -> Option<PhysicalPosition<f64>> {
     let monitor = handle.primary_monitor().ok()??;
     let origin = monitor.position();
     let size = monitor.size();
-    let x = f64::from(origin.x) + f64::from(size.width) - OVERLAY_WIDTH - MENU_BAR_MARGIN;
+    let overlay = handle
+        .get_webview_window(OVERLAY_LABEL)
+        .and_then(|window| window.outer_size().ok())
+        .map(|size| size.cast::<f64>())
+        .unwrap_or_else(|| PhysicalSize::new(OVERLAY_MIN_WIDTH, OVERLAY_MIN_HEIGHT));
+    let x = f64::from(origin.x) + f64::from(size.width) - overlay.width - MENU_BAR_MARGIN;
     let y = f64::from(origin.y) + MENU_BAR_MARGIN;
 
     Some(PhysicalPosition::new(x, y))
@@ -204,9 +245,10 @@ fn floating_position(handle: &AppHandle) -> Option<PhysicalPosition<f64>> {
 fn tray_anchor_position_for_rect(
     position: PhysicalPosition<f64>,
     size: PhysicalSize<f64>,
+    overlay: PhysicalSize<f64>,
 ) -> PhysicalPosition<f64> {
     let center_x = position.x + size.width / 2.0;
-    let x = (center_x - OVERLAY_WIDTH / 2.0).max(MENU_BAR_MARGIN);
+    let x = (center_x - overlay.width / 2.0).max(MENU_BAR_MARGIN);
     let y = position.y + size.height + MENU_BAR_MARGIN;
 
     PhysicalPosition::new(x, y)
@@ -330,7 +372,7 @@ impl PhysicalMonitorBounds {
 #[cfg(test)]
 mod tests {
     use super::{
-        capture_session_anchor, tray_anchor_position_for_rect, MENU_BAR_MARGIN, OVERLAY_WIDTH,
+        capture_session_anchor, tray_anchor_position_for_rect, MENU_BAR_MARGIN, OVERLAY_MIN_WIDTH,
     };
     use crate::platform::StatusSurfaceMode;
     use tauri::PhysicalPosition;
@@ -341,12 +383,13 @@ mod tests {
         let position = tray_anchor_position_for_rect(
             PhysicalPosition::new(640.0, 12.0),
             PhysicalSize::new(24.0, 22.0),
+            PhysicalSize::new(OVERLAY_MIN_WIDTH, 88.0),
         );
 
         assert_eq!(
             position,
             PhysicalPosition::new(
-                640.0 + 12.0 - OVERLAY_WIDTH / 2.0,
+                640.0 + 12.0 - OVERLAY_MIN_WIDTH / 2.0,
                 12.0 + 22.0 + MENU_BAR_MARGIN
             )
         );
