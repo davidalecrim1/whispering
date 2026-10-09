@@ -201,6 +201,8 @@ fn build_tray(
     TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .icon(idle_icon())
+        // The idle icon must be a template so macOS tints it to match the menu bar.
+        .icon_as_template(true)
         .on_menu_event(move |app, event| {
             let id = event.id().as_ref();
             if id == MENU_TOGGLE {
@@ -434,7 +436,14 @@ fn set_tray_icon(handle: &AppHandle, recording: bool) {
         } else {
             idle_icon()
         };
-        let _ = tray.set_icon(Some(icon));
+        if let Err(err) = tray.set_icon(Some(icon)) {
+            log::error!("Failed to update tray icon: {}", err);
+        }
+        // set_icon clears the template flag, so reapply it: idle adapts to the
+        // menu bar, while the green recording icon keeps its color.
+        if let Err(err) = tray.set_icon_as_template(!recording) {
+            log::error!("Failed to update tray icon appearance: {}", err);
+        }
     }
 }
 
