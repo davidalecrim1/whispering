@@ -4,6 +4,10 @@ Whispering is a local speech-to-text app built with Tauri, Rust, and `whisper-rs
 
 The repo now has OS-aware runtime routing and OS-aware Makefile targets for `macos`, `windows`, and `linux`. The main goal is simple local usage: clone the repo, build it, install the model, and run it.
 
+## Demo
+
+![Whispering recording speech and typing the transcribed text at the cursor](docs/assets/demo.gif)
+
 ## What You Need
 
 - Rust toolchain via `rustup`
